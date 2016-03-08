@@ -46,16 +46,6 @@ type Error struct {
 	Message string `json:"message"`
 }
 
-// type Attachment holds necessary information for an attachment
-// Mime - the MIME type of the attachment
-// Name - the name of the attachment
-// Content - Base64 encoded string of file content
-type Attachment struct {
-	Mime    string `json:"type"`
-	Name    string `json:"name"`
-	Content string `json:"content"`
-}
-
 // newError returns a new Error instance.
 func newError() *Error {
 	return &Error{}
@@ -68,24 +58,32 @@ func (err *Error) Error() string {
 
 // do is an easy function for performing requests against Mandrill's API.
 func do(url string, data interface{}, result interface{}) error {
-	err := newError()
-
+	// merr can store a the JSON object returned by mandrill on errors
+	merr := newError()
+	// prepare and send the request
 	rr := &napping.Request{
 		Url:     "https://mandrillapp.com/api/1.0" + url,
 		Method:  "POST",
 		Payload: data,
 		Result:  result,
-		Error:   err}
+		Error:   merr}
+	res, err := napping.Send(rr)
 
-	status, errs := napping.Send(rr)
-
-	if errs == nil {
-		return nil
+	// network error
+	if err != nil {
+		return err
 	}
-
-	fmt.Println(status, rr.Error)
-
-	return errs
+	// mandrill error
+	if res.Status() != 200 {
+		if merr != nil {
+			return merr
+		} else {
+			// a return JSON was not found/parsed
+			fmt.Errorf("mandrill: unknown error happened")
+		}
+	}
+	// no error happened
+	return nil
 }
 
 // Ping validates your API key. Call this to make sure your API key is correct.
@@ -111,15 +109,34 @@ type SendResult struct {
 	Id string `json:"_id"`
 }
 
+type RecipientType string
+
+var (
+	RecipientTo  RecipientType = "to"
+	RecipientCC  RecipientType = "cc"
+	RecipientBCC RecipientType = "bcc"
+)
+
 // Type To holds information about a recipient for a message.
 type To struct {
-	Email string `json:"email"`
-	Name  string `json:"name,omitempty"`
+	Email string        `json:"email"`
+	Name  string        `json:"name,omitempty"`
+	Type  RecipientType `json:"type,omitempty"`
 }
 
 type RecipientMetadata struct {
 	Recipient string                 `json:"rcpt"`
 	Values    map[string]interface{} `json:"values"`
+}
+
+// type Attachment holds necessary information for an attachment
+// Mime - the MIME type of the attachment
+// Name - the name of the attachment
+// Content - Base64 encoded string of file content
+type Attachment struct {
+	Mime    string `json:"type"`
+	Name    string `json:"name"`
+	Content string `json:"content"`
 }
 
 // Type Message represents an email message for Mandrill.
@@ -167,13 +184,18 @@ func NewMessageTo(email, name string) *Message {
 
 // AddRecipient adds a new recpipeint for msg.
 func (msg *Message) AddRecipient(email, name string) *Message {
-	to := &To{email, name}
+	return msg.AddRecipientType(email, name, RecipientTo)
+}
+
+// AddRecipientType adds a new recpipeint for msg with specified type.
+func (msg *Message) AddRecipientType(email, name string, typ RecipientType) *Message {
+	to := &To{email, name, typ}
 	msg.To = append(msg.To, to)
 	return msg
 }
 
 // AddGlobalMergeVars provides given data as merge vars with message.
-func (msg *Message) AddGlobalMergeVars(data map[string]string) *Message {
+func (msg *Message) AddGlobalMergeVars(data map[string]interface{}) *Message {
 	msg.GlobalMergeVars = append(msg.GlobalMergeVars, mapToVars(data)...)
 	return msg
 }
@@ -256,15 +278,16 @@ func (msg *Message) Send(async bool) ([]*SendResult, error) {
 func (msg *Message) SendTemplate(tmpl string, content map[string]string, async bool) ([]*SendResult, error) {
 	// prepare request data
 	var data struct {
-		Key            string      `json:"key"`
-		TemplateName   string      `json:"template_name"`
-		TemplateConent []*variable `json:"template_content"`
-		Message        *Message    `json:"message,omitempty"`
-		Async          bool        `json:"async"`
+		Key             string      `json:"key"`
+		TemplateName    string      `json:"template_name"`
+		TemplateContent []*variable `json:"template_content"`
+		Message         *Message    `json:"message,omitempty"`
+		Async           bool        `json:"async"`
 	}
+
 	data.Key = Key
 	data.TemplateName = tmpl
-	data.TemplateConent = mapToVars(content)
+	data.TemplateContent = mapToStringVars(content)
 	data.Message = msg
 	data.Async = async
 
@@ -279,15 +302,23 @@ func (msg *Message) SendTemplate(tmpl string, content map[string]string, async b
 
 // Type variable holds one piece of data for dynamic content of messages.
 type variable struct {
-	Name    string `json:"name"`
-	Content string `json:"content"`
+	Name    string      `json:"name"`
+	Content interface{} `json:"content"`
 }
 
 // mapToVars converts a map to a list variable.
-func mapToVars(m map[string]string) []*variable {
+func mapToVars(m map[string]interface{}) []*variable {
 	vars := make([]*variable, 0, len(m))
 	for k, v := range m {
 		vars = append(vars, &variable{k, v})
 	}
 	return vars
+}
+
+func mapToStringVars(m map[string]string) []*variable {
+	mGeneric := make(map[string]interface{})
+	for k, v := range m {
+		mGeneric[k] = v
+	}
+	return mapToVars(mGeneric)
 }
