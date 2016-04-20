@@ -315,7 +315,7 @@ func mapToVars(m map[string]interface{}) []*variable {
 	return vars
 }
 
-func mapToStringVars(m map[string]string) []*variable {
+func mapToStringVars(m map[string]interface{}) []*variable {
 	mGeneric := make(map[string]interface{})
 	for k, v := range m {
 		mGeneric[k] = v
