@@ -275,7 +275,7 @@ func (msg *Message) Send(async bool) ([]*SendResult, error) {
 }
 
 // SendTemplate performs a template-based send request for msg.
-func (msg *Message) SendTemplate(tmpl string, content map[string]string, async bool) ([]*SendResult, error) {
+func (msg *Message) SendTemplate(tmpl string, content map[string]interface{}, async bool) ([]*SendResult, error) {
 	// prepare request data
 	var data struct {
 		Key             string      `json:"key"`
