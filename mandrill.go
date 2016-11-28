@@ -6,7 +6,7 @@
 //
 // To use this package first set your API key:
 //
-//     mandrill.Key = "xxxx"
+//     mandrill.DefaultClient.Key = "xxxx"
 //     // you can test your API key with Ping
 //     err := mandrill.Ping()
 //     // everything is OK if err is nil
@@ -30,12 +30,30 @@ package mandrill
 import (
 	"encoding/base64"
 	"fmt"
+
 	"github.com/jmcvetta/napping"
 )
+
+// Client holds client specific Mandrill settings.
+type Client struct {
+	Key string
+}
+
+var DefaultClient = Client{}
+
+// Key returns the clients API-Key, or falls back onto the global (deprecated) Key.
+func (c Client) key() string {
+	if c.Key == "" {
+		c.Key = Key
+	}
+	return c.Key
+}
 
 // API key for Mandrill user. You should set this to your API key before calling
 // any of the functions. You can get a API key for your account in your
 // Mandrill account settings.
+// Deprecated: By using this value the package is not safe for usage by multiple clients
+// at the same time. Use `NewMessageWithClient()` for multi-client safe usage.
 var Key string
 
 // type Error holds error return messages from API calls.
@@ -51,7 +69,7 @@ func newError() *Error {
 	return &Error{}
 }
 
-// Error porduces error message for err.
+// Error produces error message for err.
 func (err *Error) Error() string {
 	return fmt.Sprintf("mandrill: %s: %s", err.Name, err.Message)
 }
@@ -88,12 +106,18 @@ func do(url string, data interface{}, result interface{}) error {
 
 // Ping validates your API key. Call this to make sure your API key is correct.
 // It should return nil as error if everything is OK.
-func Ping() error {
+func (c Client) Ping() error {
 	var data struct {
 		Key string `json:"key"`
 	}
-	data.Key = Key
+	data.Key = c.key()
 	return do("/users/ping", &data, nil)
+}
+
+// Ping validates the default API key. Call this to make sure your API key is correct.
+// It should return nil as error if everything is OK.
+func Ping() error {
+	return DefaultClient.Ping()
 }
 
 // Type SendResult holds information returned by send requests.
@@ -170,11 +194,19 @@ type Message struct {
 	// merge language to be used (can be mailchimp or handlebars)
 	MergeLanguage string `json:"merge_language,omitempty"`
 	// TODO implement other fields
+
+	// client contains client specific settings
+	client Client
 }
 
 // NewMessage returns a new instance of Message.
 func NewMessage() *Message {
-	return &Message{}
+	return &Message{client: DefaultClient}
+}
+
+// NewMessageWithClient returns a new Message instance using the given Client.
+func NewMessageWithClient(c Client) *Message {
+	return &Message{client: c}
 }
 
 // NewMessageTo makes a new message with specified recipient.
@@ -182,12 +214,17 @@ func NewMessageTo(email, name string) *Message {
 	return NewMessage().AddRecipient(email, name)
 }
 
-// AddRecipient adds a new recpipeint for msg.
+// NewMessageWithClient returns a new Message with specified recipient using the given Client.
+func NewMessageToWithClient(email, name string, c Client) *Message {
+	return NewMessageWithClient(c).AddRecipient(email, name)
+}
+
+// AddRecipient adds a new recipient for msg.
 func (msg *Message) AddRecipient(email, name string) *Message {
 	return msg.AddRecipientType(email, name, RecipientTo)
 }
 
-// AddRecipientType adds a new recpipeint for msg with specified type.
+// AddRecipientType adds a new recipient for msg with specified type.
 func (msg *Message) AddRecipientType(email, name string, typ RecipientType) *Message {
 	to := &To{email, name, typ}
 	msg.To = append(msg.To, to)
@@ -261,7 +298,7 @@ func (msg *Message) Send(async bool) ([]*SendResult, error) {
 		Message *Message `json:"message,omitempty"`
 		Async   bool     `json:"async"`
 	}
-	data.Key = Key
+	data.Key = msg.client.key()
 	data.Message = msg
 	data.Async = async
 
@@ -285,7 +322,7 @@ func (msg *Message) SendTemplate(tmpl string, content map[string]interface{}, as
 		Async           bool        `json:"async"`
 	}
 
-	data.Key = Key
+	data.Key = msg.client.key()
 	data.TemplateName = tmpl
 	data.TemplateContent = mapToStringVars(content)
 	data.Message = msg
